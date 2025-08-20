@@ -1,0 +1,9 @@
+double:
+    a: 0
+    ret: +(a,a)
+
+main:
+    input: 2
+    double.a = input
+    %(double.a)
+    %(double.ret)
