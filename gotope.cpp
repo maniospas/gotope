@@ -159,49 +159,81 @@ struct Parser {
             skipWS(); if(i>=s.size()) break;
             if(isIdentStart(s[i])){
                 size_t save=i; auto id=parseScopedIdent(); skipWS();
-                if(i<s.size() && s[i]==':'){
+                if(i<s.size() && s[i]==':' && s[i+1]!='='){
                     i++;
                     prog.labels.push_back({*id, prog.tape_pos});
                     prog.lastLabel[*id] = prog.tape_pos;
                     continue;
                 } else { i=save; }
             }
-            if(isIdentStart(s[i])){
-                auto lhs=parseScopedIdent(); skipWS();
-                if(matchChar('=')){
+            if (isIdentStart(s[i])) {
+                size_t save = i;
+                auto lhsScoped = parseScopedIdent();
+                skipWS();
+
+                // --- renaming operator := ---
+                if (matchChar(':')) {
+                    if (!matchChar('=')) throw runtime_error("Expected ':='");
+                    if (!lhsScoped) throw runtime_error("Expected identifier before ':='");
+                    if (lhsScoped->find('.') != string::npos)
+                        throw runtime_error("Renaming ':=' not allowed with dotted names: " + *lhsScoped);
+                    string lhs = *lhsScoped;
+                    skipWS();
+                    if (!isIdentStart(s[i]))
+                        throw runtime_error("RHS of ':=' must be an identifier");
+                    auto rhs = parseScopedIdent();
+                    if (!rhs) throw runtime_error("Expected identifier after ':='");
+                    int rhsLoc = resolveScoped(*rhs);
+                    prog.labels.push_back({lhs, rhsLoc});
+                    prog.lastLabel[lhs] = rhsLoc;
+                    continue;
+                }
+
+                // --- normal assignment '=' ---
+                if (matchChar('=')) {
+                    auto lhs = lhsScoped;
+                    if (!lhs) throw runtime_error("Expected identifier before '='");
                     skipWS();
                     int rhsLoc;
-                    if(s[i]=='"'){
-                        int strStart=prog.tape_pos;
+                    if (s[i] == '"') {
+                        int strStart = prog.tape_pos;
                         parseString(prog.tape_pos);
-                        rhsLoc=strStart;
-                    } else if(isIdentStart(s[i])){
-                        auto rhs=parseScopedIdent(); rhsLoc=resolveScoped(*rhs);
+                        rhsLoc = strStart;
+                    } else if (isIdentStart(s[i])) {
+                        auto rhs = parseScopedIdent();
+                        rhsLoc = resolveScoped(*rhs);
                     } else {
-                        auto n=parseNumber(); if(!n) throw runtime_error("Expected RHS of assignment");
+                        auto n = parseNumber();
+                        if (!n) throw runtime_error("Expected RHS of assignment");
                         string dummy="__";
                         prog.labels.push_back({dummy, prog.tape_pos});
-                        prog.lastLabel[dummy]=prog.tape_pos;
-                        prog.tape[prog.tape_pos]=(int)*n;
-                        prog.iscall[prog.tape_pos]=0;
+                        prog.lastLabel[dummy] = prog.tape_pos;
+                        prog.tape[prog.tape_pos] = (int)*n;
+                        prog.iscall[prog.tape_pos] = 0;
                         prog.tape_pos++;
-                        rhsLoc=prog.lastLabel[dummy];
+                        rhsLoc = prog.lastLabel[dummy];
                     }
-                    prog.tape[prog.tape_pos]=0;
-                    prog.iscall[prog.tape_pos]=0;
+
+                    prog.tape[prog.tape_pos] = 0;
+                    prog.iscall[prog.tape_pos] = 0;
                     prog.tape_pos++;
-                    prog.tape[prog.tape_pos]=0x05; // assignment opcode
-                    prog.iscall[prog.tape_pos]=1;
+                    prog.tape[prog.tape_pos] = 0x05; // assignment opcode
+                    prog.iscall[prog.tape_pos] = 1;
                     prog.tape_pos++;
-                    prog.tape[prog.tape_pos]=resolveScoped(*lhs);
-                    prog.iscall[prog.tape_pos]=0;
+                    prog.tape[prog.tape_pos] = resolveScoped(*lhs);
+                    prog.iscall[prog.tape_pos] = 0;
                     prog.tape_pos++;
-                    prog.tape[prog.tape_pos]=rhsLoc;
-                    prog.iscall[prog.tape_pos]=0;
+                    prog.tape[prog.tape_pos] = rhsLoc;
+                    prog.iscall[prog.tape_pos] = 0;
                     prog.tape_pos++;
                     continue;
                 }
+
+                // otherwise rewind
+                i = save;
             }
+
+
             if(peekChar('>')){ matchChar('>'); auto id=parseScopedIdent(); auto args=parseArgList(prog.tape_pos); encodeCall(*id,0x01,args); continue; }
             if(peekChar('*')){ matchChar('*'); auto args=parseArgList(prog.tape_pos); encodeCall("*",0x02,args); continue; }
             if(peekChar('+')){ matchChar('+'); auto args=parseArgList(prog.tape_pos); encodeCall("+",0x03,args); continue; }
@@ -217,6 +249,7 @@ struct Parser {
             prog.tape[prog.tape_pos]=(unsigned char)s[i++];
             prog.iscall[prog.tape_pos]=0;
             prog.tape_pos++;
+            throw runtime_error("Leftover expression");
         }
         int j = prog.tape_pos;
         while(j < TAPE_SIZE){
@@ -272,11 +305,13 @@ struct VM {
         return true;
     }
     void run(){
+        cout<<"\033[2J\n";
         while(step_once()){
             std::ostringstream out;
-            out << "\033[2J\033[H"; // clear screen
+            out << "\033[H"; // clear screen
+            out << "Running (terminate with ctrl+c)";
             //for(int i=0;i<prog.tape_pos;++i) out << (int)prog.tape[i] << '('<<prog.iscall[i]<<") ";
-            //out << "\n";
+            out << "\n";
             for(auto &vec:printCache){
                 for(size_t k=0;k<vec.size();++k){if(k) out << ' ';out << vec[k];}
                 out << "\n";
