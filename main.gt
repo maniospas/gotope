@@ -3,7 +3,7 @@ fn double(x) {
 }
 
 main:
-    input: 2
+    input: 5
     d = double(input)
     value= d.y
     %(input)

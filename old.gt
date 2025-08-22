@@ -1,10 +1,11 @@
-double:
-    x: 0
-    y: +(x,x)
-
 main:
-    input: 2
-    double.x = input
-    value:=double.y
-    %(input)
-    %(value)
+    double:
+        x: 0 // mutable value
+        y: +(x,x)
+
+
+
+    double.x = 5      // this is not an alias but an assignment
+    value := double.y // value is an alias of double.y (no storage cost)
+    `double.x
+    `value

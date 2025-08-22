@@ -147,8 +147,6 @@ struct Parser {
             prog.iscall[prog.tape_pos] = 0;
             prog.tape[prog.tape_pos++] = a;
         }
-        prog.iscall[prog.tape_pos] = 0;
-        prog.tape[prog.tape_pos++] = 0x00;
     }
 
     void parse(){
@@ -177,17 +175,37 @@ struct Parser {
                     if (!lhsScoped) throw runtime_error("Expected identifier before ':='");
                     if (lhsScoped->find('.') != string::npos)
                         throw runtime_error("Renaming ':=' not allowed with dotted names: " + *lhsScoped);
+
                     string lhs = *lhsScoped;
                     skipWS();
-                    if (!isIdentStart(s[i]))
-                        throw runtime_error("RHS of ':=' must be an identifier");
-                    auto rhs = parseScopedIdent();
-                    if (!rhs) throw runtime_error("Expected identifier after ':='");
-                    int rhsLoc = resolveScoped(*rhs);
+
+                    int rhsLoc;
+                    if (s[i] == '"') {
+                        int strStart = prog.tape_pos;
+                        parseString(prog.tape_pos);
+                        rhsLoc = strStart;
+                    } else if (isIdentStart(s[i])) {
+                        auto rhs = parseScopedIdent();
+                        if (!rhs) throw runtime_error("Expected identifier after ':='");
+                        rhsLoc = resolveScoped(*rhs);
+                    } else {
+                        auto n = parseNumber();
+                        if (!n) throw runtime_error("Expected RHS of ':='");
+                        string dummy="__";
+                        prog.labels.push_back({dummy, prog.tape_pos});
+                        prog.lastLabel[dummy] = prog.tape_pos;
+                        prog.tape[prog.tape_pos] = (int)*n;
+                        prog.iscall[prog.tape_pos] = 0;
+                        prog.tape_pos++;
+                        rhsLoc = prog.lastLabel[dummy];
+                    }
+
+                    // Just alias, no tape write
                     prog.labels.push_back({lhs, rhsLoc});
                     prog.lastLabel[lhs] = rhsLoc;
                     continue;
                 }
+
 
                 // --- normal assignment '=' ---
                 if (matchChar('=')) {
@@ -234,10 +252,19 @@ struct Parser {
             }
 
 
-            if(peekChar('>')){ matchChar('>'); auto id=parseScopedIdent(); auto args=parseArgList(prog.tape_pos); encodeCall(*id,0x01,args); continue; }
+            if(peekChar('>')){ matchChar('>'); auto id=parseScopedIdent(); auto args=parseArgList(prog.tape_pos); encodeCall(*id,0x01,args); continue; prog.iscall[prog.tape_pos] = 0;prog.tape[prog.tape_pos++] = 0x00;}
             if(peekChar('*')){ matchChar('*'); auto args=parseArgList(prog.tape_pos); encodeCall("*",0x02,args); continue; }
             if(peekChar('+')){ matchChar('+'); auto args=parseArgList(prog.tape_pos); encodeCall("+",0x03,args); continue; }
-            if(peekChar('%')){ matchChar('%'); auto args=parseArgList(prog.tape_pos); encodeCall("%",0x04,args); continue; }
+            if (peekChar('`')) {
+                matchChar('`');
+                skipWS();
+                vector<int> args;
+                if (s[i] == '"') {args.push_back(prog.tape_pos);parseString(prog.tape_pos);
+                } else if (isIdentStart(s[i])) {auto id = parseScopedIdent();args.push_back(resolveScoped(*id));
+                } else {auto n = parseNumber();if (!n) throw runtime_error("Expected argument after '`'");args.push_back((int)*n);}
+                encodeCall("'", 0x04, args);
+                continue;
+            }
             if(s[i]=='"'){ parseString(prog.tape_pos); continue; }
             auto n=parseNumber();
             if(n.has_value()){
@@ -246,10 +273,7 @@ struct Parser {
                 prog.tape_pos++;
                 continue;
             }
-            prog.tape[prog.tape_pos]=(unsigned char)s[i++];
-            prog.iscall[prog.tape_pos]=0;
-            prog.tape_pos++;
-            throw runtime_error("Leftover expression");
+            throw runtime_error("Leftover expression: only strings and numbers can be placed here");
         }
         int j = prog.tape_pos;
         while(j < TAPE_SIZE){
@@ -263,7 +287,7 @@ struct Parser {
 // --- VM ---
 struct VM {
     Program prog;
-    vector<vector<int>> printCache;
+    vector<int> printCache;
     explicit VM(Program p):prog(std::move(p)){}
     bool step_once(){
         int* T=prog.tape;
@@ -271,36 +295,10 @@ struct VM {
         for(int i=0;i<prog.tape_pos;i++){
             if(!C[i]) continue; // skip data
             int op=T[i];
-            if(op==0x01){
-                int zpos=i-1;
-                int dest=T[++i];
-                i++;
-                while(T[i]!=0x00){ int loc=T[i++]; T[dest++]=T[loc]; }
-                T[zpos]=T[dest-1];
-            }
-            else if(op==0x02){
-                int zpos=i-1, mul=1;
-                i++;
-                while(T[i]!=0x00){ int loc=T[i++]; mul*=T[loc]; }
-                T[zpos]=mul;
-            }
-            else if(op==0x03){
-                int zpos=i-1, sum=0;
-                i++;
-                while(T[i]!=0x00){ int loc=T[i++]; sum+=T[loc]; }
-                T[zpos]=sum;
-            }
-            else if(op==0x04){
-                i++;
-                vector<int> out;
-                while(T[i]!=0x00){ int loc=T[i++]; out.push_back(T[loc]); }
-                printCache.push_back(std::move(out));
-            }
-            else if(op==0x05){
-                int lhs=T[++i];
-                int rhs=T[++i];
-                T[lhs]=T[rhs];
-            }
+                 if(op==0x02){int zpos=i-1;i++;int mul=T[T[i]];i++;mul*=T[T[i]];T[zpos]=mul;}
+            else if(op==0x03){int zpos=i-1;i++;int sum=T[T[i]];i++;sum+=T[T[i]];T[zpos]=sum;}
+            else if(op==0x04){i++; int loc=T[i++]; printCache.push_back(T[loc]);}
+            else if(op==0x05){int lhs=T[++i];int rhs=T[++i];T[lhs]=T[rhs];}
         }
         return true;
     }
@@ -310,11 +308,9 @@ struct VM {
             std::ostringstream out;
             out << "\033[H"; // clear screen
             out << "Running (terminate with ctrl+c)";
-            //for(int i=0;i<prog.tape_pos;++i) out << (int)prog.tape[i] << '('<<prog.iscall[i]<<") ";
             out << "\n";
-            for(auto &vec:printCache){
-                for(size_t k=0;k<vec.size();++k){if(k) out << ' ';out << vec[k];}
-                out << "\n";
+            for(auto item:printCache){
+                out << item << "\n";
             }
             printCache.clear();
             cout << out.str();
