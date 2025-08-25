@@ -1,0 +1,20 @@
+// demo.gt
+one:=1
+two:=2
+x:=0
+doubleinc {
+    x:=0
+    y:*(x,two)
+    z:+(y,one)
+}
+doubleinc.x = 5
+value:=doubleinc.z // alias of double.y if possible (no storage cost)
+
+out| "In : "
+out| doubleinc.x
+out| "\nOut: "
+out| value
+
+comp:<(one,value)
+out| "\nIs out>1?\nBoolean comparison: "
+out| comp

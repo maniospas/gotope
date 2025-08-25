@@ -1,0 +1,16 @@
+// functions are macros - they create infinite expansions if they call themselves
+fn double(x) {
+    y: +(x,x)
+}
+
+main {
+    input: 5
+    d = double(input)
+    value= d.y
+    %(input)
+    %(value)
+
+    counter: loop(10) {
+        x = +(x,one)
+    }
+}
