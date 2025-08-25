@@ -1,4 +1,4 @@
-# `tope
+# gotope
 
 An small interpreted language with massive parallelization.
 
@@ -6,7 +6,7 @@ An small interpreted language with massive parallelization.
 
 Currently, only building from source is avialable. It requires
 a C++ compiler, like gcc. Clone this repository and compile ts
-contents like below, where the *openmp* compilation flag is required
+contents like below. The *openmp* compilation flag is needed
 for parallel execution:
 
 ```bash
